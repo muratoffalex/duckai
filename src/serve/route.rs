@@ -1,60 +1,66 @@
-use super::{
-    model::{ChatRequest, ModelData, Models, Pong},
-    AppState,
-};
+use super::{model::ChatRequest, AppState};
 use crate::error::Error;
 use crate::Result;
-use axum::{extract::State, response::Response, Json};
+use axum::{
+    extract::State,
+    response::{IntoResponse, Response},
+    Json,
+};
 use axum_extra::{
     extract::WithRejection,
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
 use process::ChatProcess;
-use rquest::{header, Client};
-use std::sync::LazyLock;
+use reqwest::{header, Client};
 use tracing::Instrument;
 
 const ORIGIN_API: &str = "https://duckduckgo.com";
 
-pub async fn manual_hello() -> &'static str {
-    "DuckDuckGo AI to OpenAI, Developed by penumbra-x. Go to /v1/chat/completions with POST. https://github.com/penumbra-x/duckai"
-}
-
-pub async fn ping() -> Json<Pong> {
-    Json(Pong { message: "pong" })
-}
-
 pub async fn models(
     State(state): State<AppState>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
-) -> Result<Json<Models>> {
+) -> crate::Result<Response> {
     state.valid_key(bearer)?;
 
-    static MODEL_DATA: LazyLock<[ModelData; 4]> = LazyLock::new(|| {
-        [
-            ModelData::builder()
-                .id("gpt-4o-mini")
-                .owned_by("openai")
-                .build(),
-            ModelData::builder()
-                .id("claude-3-haiku")
-                .owned_by("claude")
-                .build(),
-            ModelData::builder()
-                .id("llama-3.1-70b")
-                .owned_by("meta-llama")
-                .build(),
-            ModelData::builder()
-                .id("mixtral-8x7b")
-                .owned_by("mistral ai")
-                .build(),
-        ]
-    });
+    let model_data = vec![
+        serde_json::json!({
+            "id": "gpt-4o-mini",
+            "object": "model",
+            "created": 1686935002,
+            "owned_by": "openai",
+        }),
+        serde_json::json!({
+            "id": "claude-3-haiku",
+            "object": "model",
+            "created": 1686935002,
+            "owned_by": "claude",
+        }),
+        serde_json::json!({
+            "id": "llama-3.1-70b",
+            "object": "model",
+            "created": 1686935002,
+            "owned_by": "meta-llama",
+        }),
+        serde_json::json!({
+            "id": "o3-mini",
+            "object": "model",
+            "created": 1686935002,
+            "owned_by": "openai",
+        }),
+        serde_json::json!({
+            "id": "mixtral-8x7b",
+            "object": "model",
+            "created": 1686935002,
+            "owned_by": "mistral ai",
+        }),
+    ];
 
-    Ok(Json(
-        Models::builder().object("list").data(&MODEL_DATA).build(),
-    ))
+    Ok(Json(serde_json::json!({
+        "object": "list",
+        "data": model_data,
+    }))
+    .into_response())
 }
 
 pub async fn chat_completions(
@@ -63,7 +69,7 @@ pub async fn chat_completions(
     WithRejection(Json(body), _): WithRejection<Json<ChatRequest>, Error>,
 ) -> crate::Result<Response> {
     state.valid_key(bearer)?;
-    let client = state.load_client().await;
+    let client = state.client;
     let token = load_token(&client).await?;
     let span = tracing::info_span!("x-vqd-4", token);
     send_request(client, token, body).instrument(span).await
@@ -125,7 +131,7 @@ mod process {
     pub struct ChatProcess {
         stream: Option<bool>,
         model: String,
-        resp: rquest::Response,
+        resp: reqwest::Response,
     }
 
     impl ChatProcess {
@@ -259,7 +265,7 @@ mod process {
         }
     }
 
-    async fn process_stream<H>(resp: rquest::Response, mut handler: H)
+    async fn process_stream<H>(resp: reqwest::Response, mut handler: H)
     where
         H: FnMut(DuckChatCompletion),
     {
@@ -285,7 +291,7 @@ mod process {
     }
 
     fn process_stream_with_chunk<S, E>(
-        resp: rquest::Response,
+        resp: reqwest::Response,
         mut handler: S,
         end_handler: E,
     ) -> impl Stream<Item = EventResult>

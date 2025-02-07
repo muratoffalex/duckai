@@ -1,10 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use typed_builder::TypedBuilder;
 
-/// A role of a message sender, can be:
-/// - `System`, for starting system message, that sets the tone of model
-/// - `Assistant`, for messages sent by ChatGPT
-/// - `User`, for messages sent by user
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -13,25 +9,13 @@ pub enum Role {
     User,
 }
 
-impl Role {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Role::System => "system",
-            Role::Assistant => "assistant",
-            Role::User => "user",
-        }
-    }
-}
-
 // ==================== Request Body ====================
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatRequest {
     #[serde(deserialize_with = "deserialize_model")]
     model: String,
-
     #[serde(deserialize_with = "deserialize_message")]
     messages: Vec<Message>,
-
     #[serde(skip_serializing, default)]
     stream: Option<bool>,
 }
@@ -40,7 +24,6 @@ impl ChatRequest {
     pub fn stream(&self) -> Option<bool> {
         self.stream
     }
-
     pub fn model(self) -> String {
         self.model
     }
@@ -50,7 +33,6 @@ impl ChatRequest {
 pub struct Message {
     #[builder(default, setter(into))]
     role: Option<Role>,
-
     #[builder(default, setter(into))]
     content: Option<Content>,
 }
@@ -78,11 +60,27 @@ where
         "claude-3-haiku" => "claude-3-haiku-20240307",
         "llama-3.1-70b" => "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
         "mixtral-8x7b" => "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        _ => "gpt-4o-mini",
+        "gpt-4o-mini" => "gpt-4o-mini",
+        "o3-mini" => "o3-mini",
+        _ => model.as_str(),
     };
-
     Ok(model.to_owned())
 }
+
+// fn deserialize_message<'de, D>(deserializer: D) -> Result<Vec<Message>, D::Error>
+// where
+//     D: Deserializer<'de>,
+// {
+//     let mut message: Vec<Message> = Vec::deserialize(deserializer)?;
+//     for message in &mut message {
+//         if let Some(role) = message.role.as_mut() {
+//             if matches!(role, Role::System) {
+//                 *role = Role::User;
+//             }
+//         }
+//     }
+//     Ok(message)
+// }
 
 fn deserialize_message<'de, D>(deserializer: D) -> Result<Vec<Message>, D::Error>
 where
@@ -96,13 +94,14 @@ where
                 *role = Role::User;
             }
 
+            let role_str = serde_json::to_string(&role).unwrap();
             match msg {
                 Content::Text(msg) => {
-                    compression_message.push(format!("{}:{};", role.as_str(), msg))
+                    compression_message.push(format!("{}:{};", role_str, msg))
                 }
                 Content::Vec(vec) => {
                     for item in vec {
-                        compression_message.push(format!("{}:{};", role.as_str(), item.text));
+                        compression_message.push(format!("{}:{};", role_str, item.text));
                     }
                 }
             }
@@ -114,6 +113,7 @@ where
         .content(Content::Text(compression_message.join("\n")))
         .build()])
 }
+
 
 // ==================== Duck APi Response Body ====================
 #[derive(Deserialize)]
@@ -173,25 +173,4 @@ pub struct Usage {
     prompt_tokens: i32,
     completion_tokens: i32,
     total_tokens: i32,
-}
-
-#[derive(Serialize)]
-pub struct Pong {
-    pub message: &'static str,
-}
-
-#[derive(Serialize, TypedBuilder)]
-pub struct Models {
-    object: &'static str,
-    data: &'static [ModelData; 4],
-}
-
-#[derive(Serialize, Deserialize, TypedBuilder)]
-pub struct ModelData {
-    id: &'static str,
-    #[builder(default = "model")]
-    object: &'static str,
-    #[builder(default = 1686935002)]
-    created: i64,
-    owned_by: &'static str,
 }

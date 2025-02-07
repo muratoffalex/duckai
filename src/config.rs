@@ -1,4 +1,3 @@
-use crate::{error::Error, proxy::Proxies};
 use serde::{Deserialize, Serialize};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -22,13 +21,6 @@ pub struct Config {
     /// Forward TCP keepalive (seconds)
     pub tcp_keepalive: Option<u64>,
 
-    /// Server Enforces a limit on the concurrent number of requests the underlying
-    pub concurrent: usize,
-
-    /// Upstream proxy, support multiple proxy
-    /// Type: interface/proxy/cidr
-    pub proxies: Vec<Proxies>,
-
     /// TLS certificate file path
     pub tls_cert: Option<PathBuf>,
 
@@ -47,8 +39,6 @@ impl Default for Config {
             timeout: 60,
             connect_timeout: 10,
             tcp_keepalive: Some(90),
-            concurrent: 100,
-            proxies: Default::default(),
             tls_cert: Default::default(),
             tls_key: Default::default(),
             api_key: Default::default(),
@@ -57,38 +47,6 @@ impl Default for Config {
 }
 
 pub fn generate_template(path: PathBuf) -> crate::Result<()> {
-    // Check if the output is a directory
-    if path.is_dir() {
-        return Err(Error::IOError(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("{} is a directory", path.display()),
-        )));
-    }
-
-    // Check if the parent directory exists
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-
-    let write = |out: PathBuf| -> crate::Result<()> {
-        #[cfg(target_family = "unix")]
-        {
-            use std::{fs::Permissions, os::unix::prelude::PermissionsExt};
-            std::fs::File::create(&out)?.set_permissions(Permissions::from_mode(0o755))?;
-        }
-
-        #[cfg(target_family = "windows")]
-        std::fs::File::create(&out)?;
-
-        let yaml_config = serde_yaml::to_string(&Config::default())?;
-
-        std::fs::write(out, yaml_config).map_err(Into::into)
-    };
-
-    if !path.exists() {
-        write(path)?;
-    }
-    Ok(())
+    let yaml_config = serde_yaml::to_string(&Config::default())?;
+    std::fs::write(path, yaml_config).map_err(Into::into)
 }
