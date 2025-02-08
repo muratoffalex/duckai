@@ -1,8 +1,4 @@
-mod client;
-mod model;
-mod route;
-mod signal;
-
+use crate::client::{build_client, HttpConfig};
 use crate::{config::Config, error::Error, Result};
 use axum::{
     http::StatusCode,
@@ -12,12 +8,11 @@ use axum::{
 };
 use axum_extra::headers::{authorization::Bearer, Authorization};
 use axum_extra::TypedHeader;
-use axum_server::{tls_rustls::RustlsConfig, Handle};
-use client::{build_client, HttpConfig};
+use axum_server::tls_rustls::RustlsConfig;
 use hyper_util::rt::TokioTimer;
 use reqwest::Client;
 use serde::Serialize;
-use std::{ops::Deref, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -25,18 +20,12 @@ use typed_builder::TypedBuilder;
 
 #[derive(Clone, TypedBuilder)]
 pub struct AppState {
-    client: Client,
+    pub client: Client,
     api_key: Arc<Option<String>>,
 }
 
-impl Deref for AppState {
-    type Target = Client;
-    fn deref(&self) -> &Self::Target {
-        &self.client
-    }
-}
-
 impl AppState {
+    //pub fn client(&self) -> Client { return self.client; }
     pub fn valid_key(
         &self,
         bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -83,16 +72,10 @@ pub async fn run(path: PathBuf) -> Result<()> {
         .build();
 
     let router = Router::new()
-        .route("/v1/models", get(route::models))
-        .route("/v1/chat/completions", post(route::chat_completions))
+        .route("/v1/models", get(crate::route::models))
+        .route("/v1/chat/completions", post(crate::route::chat_completions))
         .with_state(app_state)
         .layer(global_layer);
-
-    // Signal the server to shutdown using Handle.
-    let handle = Handle::new();
-
-    // Spawn a task to gracefully shutdown server.
-    tokio::spawn(signal::graceful_shutdown(handle.clone()));
 
     // http server tcp keepalive
     let tcp_keepalive = config.tcp_keepalive.map(Duration::from_secs);
@@ -113,10 +96,7 @@ pub async fn run(path: PathBuf) -> Result<()> {
                 .timer(TokioTimer::new())
                 .keep_alive_interval(tcp_keepalive);
 
-            server
-                .handle(handle)
-                .serve(router.into_make_service())
-                .await
+            server.serve(router.into_make_service()).await
         }
         _ => {
             // No TLS configuration, create a non-secure server
@@ -128,10 +108,7 @@ pub async fn run(path: PathBuf) -> Result<()> {
                 .http2()
                 .keep_alive_interval(tcp_keepalive);
 
-            server
-                .handle(handle)
-                .serve(router.into_make_service())
-                .await
+            server.serve(router.into_make_service()).await
         }
     }
     .map_err(Into::into)

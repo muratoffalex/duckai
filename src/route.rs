@@ -1,5 +1,6 @@
-use super::{model::ChatRequest, AppState};
 use crate::error::Error;
+use crate::model::ChatRequest;
+use crate::serve::AppState;
 use crate::Result;
 use axum::{
     extract::State,
@@ -115,9 +116,7 @@ async fn load_token(client: &Client) -> Result<String> {
 
 mod process {
 
-    use crate::serve::model::{
-        ChatCompletion, Choice, Content, DuckChatCompletion, Message, Role, Usage,
-    };
+    use crate::model::{ChatCompletion, Choice, Content, DuckChatCompletion, Message, Role, Usage};
     use axum::{
         response::{sse::Event, IntoResponse, Response, Sse},
         Error, Json,
@@ -192,9 +191,9 @@ mod process {
                                 .build()])
                             .build();
 
-                        if let Some(ref model) = body.model {
-                            tracing::info!("model mapper: {} -> {}", raw_model, model);
-                        }
+                        // if let Some(ref model) = body.model {
+                        //     tracing::info!("model mapper: {} -> {}", raw_model, model);
+                        // }
 
                         Event::default()
                             .json_data(chat_completion)
@@ -232,9 +231,9 @@ mod process {
             })
             .await;
 
-            if let Some(Some(model)) = model {
-                tracing::info!("model mapper: {} -> {}", raw_model, model);
-            }
+            // if let Some(Some(model)) = model {
+            //     tracing::info!("model mapper: {} -> {}", raw_model, model);
+            // }
 
             let chat_completion = ChatCompletion::builder()
                 .id(id)

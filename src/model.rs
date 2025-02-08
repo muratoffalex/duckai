@@ -96,9 +96,7 @@ where
 
             let role_str = serde_json::to_string(&role).unwrap();
             match msg {
-                Content::Text(msg) => {
-                    compression_message.push(format!("{}:{};", role_str, msg))
-                }
+                Content::Text(msg) => compression_message.push(format!("{}:{};", role_str, msg)),
                 Content::Vec(vec) => {
                     for item in vec {
                         compression_message.push(format!("{}:{};", role_str, item.text));
@@ -113,7 +111,6 @@ where
         .content(Content::Text(compression_message.join("\n")))
         .build()])
 }
-
 
 // ==================== Duck APi Response Body ====================
 #[derive(Deserialize)]

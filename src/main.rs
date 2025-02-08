@@ -1,5 +1,8 @@
+mod client;
 mod config;
 mod error;
+mod model;
+mod route;
 mod serve;
 
 use argh::FromArgs;
