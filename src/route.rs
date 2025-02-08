@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::ChatRequest;
+use crate::model::{ChatRequest, compress_messages};
 use crate::serve::AppState;
 use crate::Result;
 use axum::{
@@ -14,7 +14,6 @@ use axum_extra::{
 };
 use process::ChatProcess;
 use reqwest::{header, Client};
-use tracing::Instrument;
 
 const ORIGIN_API: &str = "https://duckduckgo.com";
 
@@ -67,16 +66,28 @@ pub async fn models(
 pub async fn chat_completions(
     State(state): State<AppState>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
-    WithRejection(Json(body), _): WithRejection<Json<ChatRequest>, Error>,
+    WithRejection(Json(mut body), _): WithRejection<Json<ChatRequest>, Error>,
 ) -> crate::Result<Response> {
     state.valid_key(bearer)?;
-    let client = state.client;
-    let token = load_token(&client).await?;
-    let span = tracing::info_span!("x-vqd-4", token);
-    send_request(client, token, body).instrument(span).await
+    let req_key = compress_messages(&body.messages);
+    let token = if let Some(token) = state.cache.get_token(&req_key) {
+        token
+    } else {
+        let token = load_token(&state.client).await?;
+        state.cache.put_token(&req_key, token.clone());
+        body.compress_messages();
+        token
+    };
+    let (new_token, response) = send_request(&state.client, token, &body).await?;
+    state.cache.put_token(&req_key, new_token);
+    Ok(response)
 }
 
-async fn send_request(client: Client, token: String, body: ChatRequest) -> Result<Response> {
+async fn send_request(
+    client: &Client,
+    token: String,
+    body: &ChatRequest,
+) -> Result<(String, Response)> {
     let resp = client
         .post("https://duckduckgo.com/duckchat/v1/chat")
         .header(header::ACCEPT, "text/event-stream")
@@ -87,13 +98,22 @@ async fn send_request(client: Client, token: String, body: ChatRequest) -> Resul
         .send()
         .await?;
 
-    ChatProcess::builder()
+    let token = resp
+        .headers()
+        .get("x-vqd-4")
+        .and_then(|header| header.to_str().ok())
+        .ok_or_else(|| crate::Error::MissingHeader)?
+        .to_owned();
+
+    let response = ChatProcess::builder()
         .resp(resp)
-        .stream(body.stream())
-        .model(body.model())
+        .stream(body.stream)
+        .model(body.model.clone())
         .build()
         .into_response()
-        .await
+        .await?;
+
+    Ok((token, response))
 }
 
 async fn load_token(client: &Client) -> Result<String> {

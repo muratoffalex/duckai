@@ -12,7 +12,12 @@ use axum_server::tls_rustls::RustlsConfig;
 use hyper_util::rt::TokioTimer;
 use reqwest::Client;
 use serde::Serialize;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::sync::Mutex;
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -22,10 +27,10 @@ use typed_builder::TypedBuilder;
 pub struct AppState {
     pub client: Client,
     api_key: Arc<Option<String>>,
+    pub cache: TokenCache,
 }
 
 impl AppState {
-    //pub fn client(&self) -> Client { return self.client; }
     pub fn valid_key(
         &self,
         bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -37,6 +42,40 @@ impl AppState {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct TokenCache {
+    cache: Arc<Mutex<Vec<(String, String, Instant)>>>,
+}
+
+impl TokenCache {
+    pub fn get_token(&self, req_key: &str) -> Option<String> {
+        let mut cache = self.cache.lock().unwrap();
+        cache.retain(|(_, _, ts)| ts.elapsed().as_secs() < 360);
+        let item = cache
+            .iter_mut()
+            .filter(|(key, _, _)| req_key.starts_with(key))
+            .max_by_key(|(key, _, _)| key.len());
+        if let Some(item) = item {
+            item.0 = req_key.to_owned();
+            item.2 = Instant::now();
+            Some(item.1.clone())
+        } else {
+            None
+        }
+    }
+    pub fn put_token(&self, req_key: &str, token: String) {
+        let mut cache = self.cache.lock().unwrap();
+        for item in cache.iter_mut() {
+            if item.0 == req_key {
+                item.1 = token;
+                item.2 = Instant::now();
+                return;
+            }
+        }
+        cache.push((req_key.to_owned(), token, Instant::now()));
     }
 }
 
@@ -69,6 +108,7 @@ pub async fn run(path: PathBuf) -> Result<()> {
     let app_state = AppState::builder()
         .client(build_client(http_config).await)
         .api_key(Arc::new(config.api_key))
+        .cache(Default::default())
         .build();
 
     let router = Router::new()

@@ -13,28 +13,19 @@ pub enum Role {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatRequest {
     #[serde(deserialize_with = "deserialize_model")]
-    model: String,
+    pub model: String,
     #[serde(deserialize_with = "deserialize_message")]
-    messages: Vec<Message>,
+    pub messages: Vec<Message>,
     #[serde(skip_serializing, default)]
-    stream: Option<bool>,
-}
-
-impl ChatRequest {
-    pub fn stream(&self) -> Option<bool> {
-        self.stream
-    }
-    pub fn model(self) -> String {
-        self.model
-    }
+    pub stream: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, TypedBuilder)]
 pub struct Message {
     #[builder(default, setter(into))]
-    role: Option<Role>,
+    pub role: Option<Role>,
     #[builder(default, setter(into))]
-    content: Option<Content>,
+    pub content: Option<Content>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,7 +39,7 @@ pub enum Content {
 pub struct ContentItem {
     #[serde(rename = "type")]
     r#type: String,
-    text: String,
+    pub text: String,
 }
 
 fn deserialize_model<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -67,49 +58,49 @@ where
     Ok(model.to_owned())
 }
 
-// fn deserialize_message<'de, D>(deserializer: D) -> Result<Vec<Message>, D::Error>
-// where
-//     D: Deserializer<'de>,
-// {
-//     let mut message: Vec<Message> = Vec::deserialize(deserializer)?;
-//     for message in &mut message {
-//         if let Some(role) = message.role.as_mut() {
-//             if matches!(role, Role::System) {
-//                 *role = Role::User;
-//             }
-//         }
-//     }
-//     Ok(message)
-// }
-
 fn deserialize_message<'de, D>(deserializer: D) -> Result<Vec<Message>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let message: Vec<Message> = Vec::deserialize(deserializer)?;
-    let mut compression_message = Vec::with_capacity(message.len());
-    for mut message in message {
-        if let (Some(role), Some(msg)) = (message.role.as_mut(), message.content) {
+    let mut message: Vec<Message> = Vec::deserialize(deserializer)?;
+    for message in &mut message {
+        if let Some(role) = message.role.as_mut() {
             if matches!(role, Role::System) {
                 *role = Role::User;
             }
+        }
+    }
+    Ok(message)
+}
 
-            let role_str = serde_json::to_string(&role).unwrap();
+pub fn compress_messages(messages: &[Message]) -> String {
+    let mut key = String::new();
+    for message in messages {
+        if let (Some(role), Some(msg)) = (&message.role, &message.content) {
+            let role = serde_json::to_string(&role).unwrap();
+            let role = role.trim_matches('"');
             match msg {
-                Content::Text(msg) => compression_message.push(format!("{}:{};", role_str, msg)),
+                Content::Text(msg) => key.push_str(&format!("{role}:{msg};\n")),
                 Content::Vec(vec) => {
                     for item in vec {
-                        compression_message.push(format!("{}:{};", role_str, item.text));
+                        key.push_str(&format!("{role}:{};\n", item.text));
                     }
                 }
             }
         }
     }
+    key
+}
 
-    Ok(vec![Message::builder()
-        .role(Role::User)
-        .content(Content::Text(compression_message.join("\n")))
-        .build()])
+impl ChatRequest {
+    pub fn compress_messages(&mut self) {
+        if self.messages.len() > 1 {
+            self.messages = vec![Message::builder()
+                .role(Role::User)
+                .content(Content::Text(compress_messages(&self.messages)))
+                .build()];
+        }
+    }
 }
 
 // ==================== Duck APi Response Body ====================
