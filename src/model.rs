@@ -18,6 +18,8 @@ pub struct ChatRequest {
     pub messages: Vec<Message>,
     #[serde(skip_serializing, default)]
     pub stream: Option<bool>,
+    #[serde(skip_serializing, default)]
+    pub compressed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, TypedBuilder)]
@@ -94,11 +96,12 @@ pub fn compress_messages(messages: &[Message]) -> String {
 
 impl ChatRequest {
     pub fn compress_messages(&mut self) {
-        if self.messages.len() > 1 {
+        if self.messages.len() > 1 || self.compressed {
             self.messages = vec![Message::builder()
                 .role(Role::User)
                 .content(Content::Text(compress_messages(&self.messages)))
                 .build()];
+            self.compressed = true;
         }
     }
 }

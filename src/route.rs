@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::{ChatRequest, compress_messages};
+use crate::model::{compress_messages, ChatRequest};
 use crate::serve::AppState;
 use crate::Result;
 use axum::{
@@ -74,12 +74,13 @@ pub async fn chat_completions(
         token
     } else {
         let token = load_token(&state.client).await?;
-        state.cache.put_token(&req_key, token.clone());
         body.compress_messages();
         token
     };
     let (new_token, response) = send_request(&state.client, token, &body).await?;
-    state.cache.put_token(&req_key, new_token);
+    if !body.compressed {
+        state.cache.put_token(&req_key, new_token);
+    }
     Ok(response)
 }
 
