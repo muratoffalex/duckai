@@ -37,7 +37,7 @@ pub async fn models(
             "owned_by": "claude",
         }),
         serde_json::json!({
-            "id": "llama-3.1-70b",
+            "id": "llama-3.3-70b",
             "object": "model",
             "created": 1686935002,
             "owned_by": "meta-llama",
@@ -49,7 +49,7 @@ pub async fn models(
             "owned_by": "openai",
         }),
         serde_json::json!({
-            "id": "mixtral-8x7b",
+            "id": "mixtral-small-3",
             "object": "model",
             "created": 1686935002,
             "owned_by": "mistral ai",
