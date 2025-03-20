@@ -47,11 +47,11 @@ impl AppState {
 
 #[derive(Clone, Default)]
 pub struct TokenCache {
-    cache: Arc<Mutex<Vec<(String, String, Instant)>>>,
+    cache: Arc<Mutex<Vec<(String, (String, String), Instant)>>>,
 }
 
 impl TokenCache {
-    pub fn get_token(&self, req_key: &str) -> Option<String> {
+    pub fn get_token(&self, req_key: &str) -> Option<(String, String)> {
         let mut cache = self.cache.lock().unwrap();
         cache.retain(|(_, _, ts)| ts.elapsed().as_secs() < 360);
         let item = cache
@@ -66,7 +66,7 @@ impl TokenCache {
             None
         }
     }
-    pub fn put_token(&self, req_key: &str, token: String) {
+    pub fn put_token(&self, req_key: &str, token: (String, String)) {
         let mut cache = self.cache.lock().unwrap();
         for item in cache.iter_mut() {
             if item.0 == req_key {

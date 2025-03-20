@@ -86,15 +86,16 @@ pub async fn chat_completions(
 
 async fn send_request(
     client: &Client,
-    token: String,
+    (token, hash): (String, String),
     body: &ChatRequest,
-) -> Result<(String, Response)> {
+) -> Result<((String, String), Response)> {
     let resp = client
         .post("https://duckduckgo.com/duckchat/v1/chat")
         .header(header::ACCEPT, "text/event-stream")
         .header(header::ORIGIN, ORIGIN_API)
         .header(header::REFERER, ORIGIN_API)
         .header("x-vqd-4", token)
+        .header("x-vqd-hash-1", hash)
         .json(&body)
         .send()
         .await?;
@@ -102,6 +103,13 @@ async fn send_request(
     let token = resp
         .headers()
         .get("x-vqd-4")
+        .and_then(|header| header.to_str().ok())
+        .ok_or_else(|| crate::Error::MissingHeader)?
+        .to_owned();
+
+    let hash = resp
+        .headers()
+        .get("x-vqd-hash-1")
         .and_then(|header| header.to_str().ok())
         .ok_or_else(|| crate::Error::MissingHeader)?
         .to_owned();
@@ -114,10 +122,10 @@ async fn send_request(
         .into_response()
         .await?;
 
-    Ok((token, response))
+    Ok(((token, hash), response))
 }
 
-async fn load_token(client: &Client) -> Result<String> {
+async fn load_token(client: &Client) -> Result<(String, String)> {
     let resp = client
         .get("https://duckduckgo.com/duckchat/v1/status")
         .header(header::REFERER, ORIGIN_API)
@@ -130,9 +138,17 @@ async fn load_token(client: &Client) -> Result<String> {
         .headers()
         .get("x-vqd-4")
         .and_then(|header| header.to_str().ok())
-        .ok_or_else(|| crate::Error::MissingHeader)?;
+        .ok_or_else(|| crate::Error::MissingHeader)?
+        .to_owned();
 
-    Ok(token.to_string())
+    let hash = resp
+        .headers()
+        .get("x-vqd-hash-1")
+        .and_then(|header| header.to_str().ok())
+        .ok_or_else(|| crate::Error::MissingHeader)?
+        .to_owned();
+
+    Ok((token, hash))
 }
 
 mod process {
