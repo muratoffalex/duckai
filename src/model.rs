@@ -97,10 +97,12 @@ pub fn compress_messages(messages: &[Message]) -> String {
 impl ChatRequest {
     pub fn compress_messages(&mut self) {
         if self.messages.len() > 1 || self.compressed {
-            self.messages = vec![Message::builder()
-                .role(Role::User)
-                .content(Content::Text(compress_messages(&self.messages)))
-                .build()];
+            self.messages = vec![
+                Message::builder()
+                    .role(Role::User)
+                    .content(Content::Text(compress_messages(&self.messages)))
+                    .build(),
+            ];
             self.compressed = true;
         }
     }

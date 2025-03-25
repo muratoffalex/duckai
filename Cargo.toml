@@ -33,3 +33,8 @@ hyper-util = { version = "0.1.10", features = ["http2", "tokio"] }
 axum-extra = { version =  "0.10.0", features = ["typed-header"] }
 tower-http = { version = "0.6.2", default-features = false, features = ["cors"] }
 tower = { version = "0.5.2", default-features = false }
+
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+regex = "1"

@@ -1,19 +1,23 @@
-use crate::error::Error;
-use crate::model::{compress_messages, ChatRequest};
-use crate::serve::AppState;
 use crate::Result;
+use crate::error::Error;
+use crate::model::{ChatRequest, compress_messages};
+use crate::serve::AppState;
 use axum::{
+    Json,
     extract::State,
     response::{IntoResponse, Response},
-    Json,
 };
 use axum_extra::{
-    extract::WithRejection,
-    headers::{authorization::Bearer, Authorization},
     TypedHeader,
+    extract::WithRejection,
+    headers::{Authorization, authorization::Bearer},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use process::ChatProcess;
-use reqwest::{header, Client};
+use regex::Regex;
+use reqwest::{Client, header};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 const ORIGIN_API: &str = "https://duckduckgo.com";
 
@@ -69,18 +73,19 @@ pub async fn chat_completions(
     WithRejection(Json(mut body), _): WithRejection<Json<ChatRequest>, Error>,
 ) -> crate::Result<Response> {
     state.valid_key(bearer)?;
-    let req_key = compress_messages(&body.messages);
-    let token = if let Some(token) = state.cache.get_token(&req_key) {
-        token
-    } else {
+    // let req_key = compress_messages(&body.messages);
+    // let token = if let Some(token) = state.cache.get_token(&req_key) {
+    //     token
+    // } else {
+    let token = {
         let token = load_token(&state.client).await?;
         body.compress_messages();
         token
     };
     let (new_token, response) = send_request(&state.client, token, &body).await?;
-    if !body.compressed {
-        state.cache.put_token(&req_key, new_token);
-    }
+    // if !body.compressed {
+    //     state.cache.put_token(&req_key, new_token);
+    // }
     Ok(response)
 }
 
@@ -89,13 +94,15 @@ async fn send_request(
     (token, hash): (String, String),
     body: &ChatRequest,
 ) -> Result<((String, String), Response)> {
+    let request_hash = gen_request_hash(&hash);
+
     let resp = client
         .post("https://duckduckgo.com/duckchat/v1/chat")
         .header(header::ACCEPT, "text/event-stream")
         .header(header::ORIGIN, ORIGIN_API)
         .header(header::REFERER, ORIGIN_API)
         .header("x-vqd-4", token)
-        .header("x-vqd-hash-1", hash)
+        .header("x-vqd-hash-1", request_hash)
         .json(&body)
         .send()
         .await?;
@@ -151,12 +158,79 @@ async fn load_token(client: &Client) -> Result<(String, String)> {
     Ok((token, hash))
 }
 
+fn gen_request_hash(hash: &str) -> String {
+    let decoded_bytes = BASE64_STANDARD
+        .decode(hash.as_bytes())
+        .expect("invalid base64");
+    let decoded_str = String::from_utf8(decoded_bytes).expect("invalid utf-8");
+
+    let server_hashes_array_str = Regex::new(r"server_hashes:\s*\[([^\]]*)\]")
+        .unwrap()
+        .captures(&decoded_str)
+        .and_then(|cap| cap.get(1))
+        .unwrap()
+        .as_str();
+    let server_hashes_b64: Vec<String> = Regex::new(r#""([^"]*)""#)
+        .unwrap()
+        .captures_iter(server_hashes_array_str)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+        .collect();
+
+    let client_hashes_str = Regex::new(r"client_hashes:\s*\[([^\]]*)\]")
+        .unwrap()
+        .captures(&decoded_str)
+        .and_then(|cap| cap.get(1))
+        .unwrap()
+        .as_str();
+
+    let extracted_number: i32 = Regex::new(r"String\((\d+)")
+        .unwrap()
+        .captures(client_hashes_str)
+        .and_then(|cap| cap.get(1))
+        .map_or("", |m| m.as_str())
+        .parse()
+        .unwrap();
+
+    let extracted_innerhtml = Regex::new(r"e\.innerHTML = '([^']*)'")
+        .unwrap()
+        .captures(client_hashes_str)
+        .unwrap()
+        .get(1)
+        .map_or("", |m| m.as_str());
+
+    fn compute_sha256_base64(input: &str) -> String {
+        let hash = Sha256::digest(input.as_bytes());
+        BASE64_STANDARD.encode(hash)
+    }
+
+    let inner_html_lengths: HashMap<&str, i32> = HashMap::from([
+        ("<div><div></div><div></div", 33),
+        ("<p><div></p><p></div", 32),
+        ("<br><div></br><br></div", 23),
+        ("<li><div></li><li></div", 29),
+    ]);
+
+    let inner_html_len = inner_html_lengths
+        .get(extracted_innerhtml)
+        .expect(&format!("new pattern {}", &extracted_innerhtml));
+
+    let user_agent_hash = compute_sha256_base64(crate::client::USER_AGENT);
+    let number_hash = compute_sha256_base64(&(extracted_number + inner_html_len).to_string());
+
+    let result_json = serde_json::json!({
+        "server_hashes": server_hashes_b64,
+        "client_hashes": [user_agent_hash, number_hash],
+        "signals": {}
+    });
+    BASE64_STANDARD.encode(result_json.to_string())
+}
+
 mod process {
 
     use crate::model::{ChatCompletion, Choice, Content, DuckChatCompletion, Message, Role, Usage};
     use axum::{
-        response::{sse::Event, IntoResponse, Response, Sse},
         Error, Json,
+        response::{IntoResponse, Response, Sse, sse::Event},
     };
     use eventsource_stream::Eventsource;
     use futures_util::{Stream, StreamExt};
@@ -197,17 +271,19 @@ mod process {
                                 .model(&raw_model)
                                 .object("chat.completion.chunk")
                                 .created(body.created)
-                                .choices(vec![Choice::builder()
-                                    .index(0)
-                                    .delta(
-                                        Message::builder()
-                                            .role(role)
-                                            .content(Content::Text(content))
-                                            .build(),
-                                    )
-                                    .logprobs(None)
-                                    .finish_reason(None)
-                                    .build()])
+                                .choices(vec![
+                                    Choice::builder()
+                                        .index(0)
+                                        .delta(
+                                            Message::builder()
+                                                .role(role)
+                                                .content(Content::Text(content))
+                                                .build(),
+                                        )
+                                        .logprobs(None)
+                                        .finish_reason(None)
+                                        .build(),
+                                ])
                                 .build();
 
                             return Event::default()
@@ -220,12 +296,14 @@ mod process {
                             .model(&raw_model)
                             .object("chat.completion.chunk")
                             .created(body.created)
-                            .choices(vec![Choice::builder()
-                                .index(0)
-                                .delta(Message::default())
-                                .logprobs(None)
-                                .finish_reason("stop")
-                                .build()])
+                            .choices(vec![
+                                Choice::builder()
+                                    .index(0)
+                                    .delta(Message::default())
+                                    .logprobs(None)
+                                    .finish_reason("stop")
+                                    .build(),
+                            ])
                             .build();
 
                         // if let Some(ref model) = body.model {
@@ -277,17 +355,19 @@ mod process {
                 .model(&raw_model)
                 .object("chat.completion")
                 .created(created)
-                .choices(vec![Choice::builder()
-                    .index(0)
-                    .message(
-                        Message::builder()
-                            .role(Role::Assistant)
-                            .content(Content::Text(content))
-                            .build(),
-                    )
-                    .logprobs(None)
-                    .finish_reason("stop")
-                    .build()])
+                .choices(vec![
+                    Choice::builder()
+                        .index(0)
+                        .message(
+                            Message::builder()
+                                .role(Role::Assistant)
+                                .content(Content::Text(content))
+                                .build(),
+                        )
+                        .logprobs(None)
+                        .finish_reason("stop")
+                        .build(),
+                ])
                 .usage(
                     Usage::builder()
                         .completion_tokens(0)

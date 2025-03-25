@@ -1,7 +1,9 @@
 use axum::http::{HeaderMap, HeaderValue};
-use reqwest::{header, Client};
+use reqwest::{Client, header};
 use std::time::Duration;
 use typed_builder::TypedBuilder;
+
+pub const USER_AGENT: &'static str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 #[derive(TypedBuilder, Clone)]
 pub struct HttpConfig {
@@ -25,16 +27,7 @@ pub async fn build_client(config: HttpConfig) -> Client {
 
     // headers
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Sec-Ch-Ua",
-        HeaderValue::from_static(
-            r#""Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24""#,
-        ),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
-    );
+    headers.insert(header::USER_AGENT, HeaderValue::from_static(USER_AGENT));
 
     builder
         // .impersonate(random_impersonate())

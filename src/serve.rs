@@ -1,13 +1,13 @@
-use crate::client::{build_client, HttpConfig};
-use crate::{config::Config, error::Error, Result};
+use crate::client::{HttpConfig, build_client};
+use crate::{Result, config::Config, error::Error};
 use axum::{
+    Json, Router,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
-use axum_extra::headers::{authorization::Bearer, Authorization};
 use axum_extra::TypedHeader;
+use axum_extra::headers::{Authorization, authorization::Bearer};
 use axum_server::tls_rustls::RustlsConfig;
 use hyper_util::rt::TokioTimer;
 use reqwest::Client;
