@@ -1,5 +1,6 @@
 use crate::Result;
-use crate::error::Error::{self, HashError, MissingHeader};
+use crate::error::Error::{self, MissingHeader};
+use crate::hash::gen_request_hash;
 use crate::model::ChatRequest;
 use crate::serve::AppState;
 use axum::{
@@ -12,12 +13,8 @@ use axum_extra::{
     extract::WithRejection,
     headers::{Authorization, authorization::Bearer},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use process::ChatProcess;
-use regex::Regex;
 use reqwest::{Client, header};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 const ORIGIN_API: &str = "https://duckduckgo.com";
 
@@ -73,11 +70,17 @@ pub async fn chat_completions(
     WithRejection(Json(mut body), _): WithRejection<Json<ChatRequest>, Error>,
 ) -> crate::Result<Response> {
     state.valid_key(bearer)?;
-    let token = {
-        let token = load_token(&state.client).await?;
-        body.compress_messages();
-        token
-    };
+    let mut token = None;
+    for _ in 0..10 {
+        token = load_token(&state.client).await.ok();
+        if token.is_some() {
+            break;
+        }
+        tracing::info!("retry load token");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let token = token.ok_or_else(|| Error::BadRequest("cannot get token".to_string()))?;
+    body.compress_messages();
     let (_, response) = send_request(&state.client, token, &body).await?;
     Ok(response)
 }
@@ -87,22 +90,13 @@ async fn send_request(
     (token, hash): (String, String),
     body: &ChatRequest,
 ) -> Result<((String, String), Response)> {
-    let mut request_hash;
-    // FIXME
-    loop {
-        request_hash = gen_request_hash(&hash);
-        if request_hash.is_ok() {
-            break;
-        }
-    }
-
     let resp = client
         .post("https://duckduckgo.com/duckchat/v1/chat")
         .header(header::ACCEPT, "text/event-stream")
         .header(header::ORIGIN, ORIGIN_API)
         .header(header::REFERER, ORIGIN_API)
         .header("x-vqd-4", token)
-        .header("x-vqd-hash-1", request_hash?)
+        .header("x-vqd-hash-1", hash)
         .json(&body)
         .send()
         .await?;
@@ -155,124 +149,9 @@ async fn load_token(client: &Client) -> Result<(String, String)> {
         .ok_or_else(|| crate::Error::MissingHeader)?
         .to_owned();
 
-    Ok((token, hash))
-}
+    let request_hash = gen_request_hash(&hash)?;
 
-fn gen_request_hash(hash: &str) -> Result<String> {
-    let decoded_bytes = BASE64_STANDARD
-        .decode(hash.as_bytes())
-        .expect("invalid base64");
-    let decoded_str = String::from_utf8(decoded_bytes).expect("invalid utf-8");
-
-    let string_array: Vec<&str> = Regex::new(r"=\[([^\]]*)\]")
-        .unwrap()
-        .captures(&decoded_str)
-        .and_then(|cap| cap.get(1))
-        .ok_or_else(|| HashError("string array not found"))?
-        .as_str()
-        .split(',')
-        .map(|s| s.trim_matches('\''))
-        .collect();
-
-    let offset: i32 = Regex::new(r"0x([[:alnum:]]+);let")
-        .unwrap()
-        .captures(&decoded_str)
-        .and_then(|cap| cap.get(1))
-        .and_then(|s| i32::from_str_radix(s.as_str(), 16).ok())
-        .ok_or_else(|| HashError("offset not found"))?;
-    // dbg!(&decoded_str);
-
-    let server_hash_indices: (i32, i32) =
-        Regex::new(r"'server_hashes':\[_0x[[:alnum:]]+\(0x([[:alnum:]]+)\),_0x[[:alnum:]]+\(0x([[:alnum:]]+)\)\]")
-        .unwrap()
-        .captures(&decoded_str)
-        .and_then(|cap| cap.get(1).zip(cap.get(2)))
-        .and_then(|(s1, s2)| i32::from_str_radix(s1.as_str(), 16).ok().zip(i32::from_str_radix(s2.as_str(), 16).ok()))
-        .ok_or_else(|| HashError("server hash indices not found"))?;
-    // dbg!(server_hash_indices);
-
-    let user_agent_index: i32 =
-        Regex::new(r"'client_hashes':\[navigator\[_0x[[:alnum:]]+\(0x([[:alnum:]]+)\)\]")
-            .unwrap()
-            .captures(&decoded_str)
-            .and_then(|cap| cap.get(1))
-            .and_then(|s| i32::from_str_radix(s.as_str(), 16).ok())
-            .ok_or_else(|| HashError("user agent indices not found"))?;
-    // dbg!(user_agent_index);
-
-    let origin_user_agent_index: i32 = string_array
-        .iter()
-        .position(|&s| s == "userAgent")
-        .ok_or_else(|| HashError("origin user agent index not found"))?
-        as i32;
-    // dbg!(origin_user_agent_index);
-
-    let origin_server_hash_indices = (
-        (server_hash_indices.0 - offset + string_array.len() as i32 + origin_user_agent_index
-            - (user_agent_index - offset))
-            % (string_array.len() as i32),
-        (server_hash_indices.1 - offset + string_array.len() as i32 + origin_user_agent_index
-            - (user_agent_index - offset))
-            % (string_array.len() as i32),
-    );
-    // dbg!(origin_server_hash_indices);
-
-    let server_hashes = [
-        string_array[origin_server_hash_indices.0 as usize],
-        string_array[origin_server_hash_indices.1 as usize],
-    ];
-    // dbg!(server_hashes);
-
-    let innerhtml_index = Regex::new(r"\(0x([[:alnum:]]+)\),String")
-        .unwrap()
-        .captures(&decoded_str)
-        .and_then(|cap| cap.get(1))
-        .and_then(|s| i32::from_str_radix(s.as_str(), 16).ok())
-        .ok_or_else(|| HashError("user agent indices not found"))?;
-    // dbg!(innerhtml_index);
-
-    let origin_innerhtml_index =
-        (innerhtml_index - offset + string_array.len() as i32 + origin_user_agent_index
-            - (user_agent_index - offset))
-            % (string_array.len() as i32);
-    // dbg!(origin_innerhtml_index);
-
-    let innerhtml = string_array[origin_innerhtml_index as usize];
-    // dbg!(innerhtml);
-
-    let inner_html_data: HashMap<&str, i32> = HashMap::from([
-        ("<div><div></div><div></div", 99),
-        ("<p><div></p><p></div", 128),
-        ("<br><div></br><br></div", 92),
-        ("<li><div></li><li></div", 87),
-    ]);
-
-    let inner_html_len = inner_html_data
-        .get(innerhtml)
-        .expect(&format!("new pattern {}", &innerhtml));
-
-    let extracted_number: i32 = Regex::new(r"String\(0x([[:alnum:]]+)\+")
-        .unwrap()
-        .captures(&decoded_str)
-        .and_then(|cap| cap.get(1))
-        .and_then(|s| i32::from_str_radix(s.as_str(), 16).ok())
-        .ok_or_else(|| HashError("extracted number not found"))?;
-    // dbg!(extracted_number);
-
-    fn compute_sha256_base64(input: &str) -> String {
-        let hash = Sha256::digest(input.as_bytes());
-        BASE64_STANDARD.encode(hash)
-    }
-
-    let user_agent_hash = compute_sha256_base64(crate::client::USER_AGENT);
-    let number_hash = compute_sha256_base64(&(extracted_number + inner_html_len).to_string());
-
-    let result_json = serde_json::json!({
-        "server_hashes": server_hashes,
-        "client_hashes": [user_agent_hash, number_hash],
-        "signals": {}
-    });
-    Ok(BASE64_STANDARD.encode(result_json.to_string()))
+    Ok((token, request_hash))
 }
 
 mod process {

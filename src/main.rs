@@ -1,6 +1,7 @@
 mod client;
 mod config;
 mod error;
+mod hash;
 mod model;
 mod route;
 mod serve;
