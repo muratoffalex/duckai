@@ -46,6 +46,23 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     let mut shift_offset = None;
 
     if shift_offset.is_none() {
+        let doc_pat = Regex::new(r"document\[[^(]*\(0x([[:alnum:]]+)\)\]")
+            .unwrap()
+            .captures(&decoded_str)
+            .and_then(|cap| cap.get(1))
+            .map(|s| s.as_str());
+        // dbg!(doc_pat);
+        if let Some(pat) = doc_pat {
+            let index = get_hex(pat);
+            let origin_index = string_array
+                .iter()
+                .position(|&s| s == "createElement")
+                .unwrap() as isize;
+            shift_offset = Some(origin_index - (index - offset));
+        }
+    }
+
+    if shift_offset.is_none() {
         let user_agent_pat =
             Regex::new(r"'client_hashes':\[navigator\[[^(]*\(0x([[:alnum:]]+)\)\]")
                 .unwrap()
@@ -62,7 +79,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     }
 
     if shift_offset.is_none() {
-        let div_pat = Regex::new(r"0x([[:alnum:]])\)\);return\s")
+        let div_pat = Regex::new(r"0x([[:alnum:]]+)\)\);return\s")
             .unwrap()
             .captures(&decoded_str)
             .and_then(|cap| cap.get(1))

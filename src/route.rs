@@ -71,13 +71,12 @@ pub async fn chat_completions(
 ) -> crate::Result<Response> {
     state.valid_key(bearer)?;
     let mut token = None;
-    for _ in 0..10 {
+    for _ in 0..5 {
         token = load_token(&state.client).await.ok();
         if token.is_some() {
             break;
         }
-        tracing::info!("retry load token");
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tracing::info!("retry load token: {:?}", token);
     }
     let token = token.ok_or_else(|| Error::BadRequest("cannot get token".to_string()))?;
     body.compress_messages();
