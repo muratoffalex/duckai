@@ -89,6 +89,8 @@ async fn send_request(
     (token, hash): (String, String),
     body: &ChatRequest,
 ) -> Result<((String, String), Response)> {
+    // dbg!(&token);
+    // dbg!(&hash);
     let resp = client
         .post("https://duckduckgo.com/duckchat/v1/chat")
         .header(header::ACCEPT, "text/event-stream")

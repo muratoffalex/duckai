@@ -20,10 +20,12 @@ fn compute_sha256_base64(input: &str) -> String {
 }
 
 pub fn gen_request_hash(hash: &str) -> Result<String> {
+    // let hash = "";
     let decoded_bytes = BASE64_STANDARD
         .decode(hash.as_bytes())
         .expect("invalid base64");
     let decoded_str = String::from_utf8(decoded_bytes).expect("invalid utf-8");
+    // dbg!(&decoded_str);
 
     let string_array: Vec<&str> = Regex::new(r"=\[([^\]]*)\]")
         .unwrap()
@@ -41,7 +43,6 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
         .and_then(|cap| cap.get(1))
         .and_then(|s| isize::from_str_radix(s.as_str(), 16).ok())
         .ok_or_else(|| HashError("offset not found"))?;
-    // dbg!(&decoded_str);
 
     let mut shift_offset = None;
 
@@ -157,12 +158,38 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     // dbg!(extracted_number);
 
     let user_agent_hash = compute_sha256_base64(crate::client::USER_AGENT);
+    // dbg!(extracted_number + inner_html_len);
     let number_hash = compute_sha256_base64(&(extracted_number + inner_html_len).to_string());
+
+    let challenge_id_pat = Regex::new(r"'challenge_id':([^}]+)")
+        .unwrap()
+        .captures(&decoded_str)
+        .and_then(|cap| cap.get(1))
+        .map(|s| s.as_str())
+        .ok_or_else(|| HashError("inner html pat not found"))?;
+
+    let challenge_id = if challenge_id_pat.starts_with('\'') {
+        challenge_id_pat.trim_matches('\'')
+    } else {
+        let index = get_hex(challenge_id_pat);
+        let origin_index = (index - offset + shift_offset + string_array.len() as isize)
+            % string_array.len() as isize;
+        string_array[origin_index as usize]
+    };
+    // dbg!(challenge_id);
 
     let result_json = serde_json::json!({
         "server_hashes": server_hashes,
         "client_hashes": [user_agent_hash, number_hash],
-        "signals": {}
+        "signals": {},
+        "meta": {
+            "v": "1",
+            "challenge_id": challenge_id,
+            "origin":"https://duckduckgo.com",
+            "stack":"@https://duckduckgo.com/dist/wpm.chat.d36ef957fca575bcf40b.js:1:40968"
+        }
     });
+    // dbg!(result_json.to_string());
+
     Ok(BASE64_STANDARD.encode(result_json.to_string()))
 }
