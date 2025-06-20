@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod hash;
 mod model;
+mod process;
 mod route;
 mod serve;
 
