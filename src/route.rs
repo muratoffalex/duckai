@@ -86,28 +86,19 @@ pub async fn chat_completions(
 
 async fn send_request(
     client: &Client,
-    (token, hash): (String, String),
+    hash: String,
     body: &ChatRequest,
-) -> Result<((String, String), Response)> {
-    // dbg!(&token);
+) -> Result<(String, Response)> {
     // dbg!(&hash);
     let resp = client
         .post("https://duckduckgo.com/duckchat/v1/chat")
         .header(header::ACCEPT, "text/event-stream")
         .header(header::ORIGIN, ORIGIN_API)
         .header(header::REFERER, ORIGIN_API)
-        .header("x-vqd-4", token)
         .header("x-vqd-hash-1", hash)
         .json(&body)
         .send()
         .await?;
-
-    let token = resp
-        .headers()
-        .get("x-vqd-4")
-        .and_then(|header| header.to_str().ok())
-        .ok_or_else(|| MissingHeader)?
-        .to_owned();
 
     let hash = resp
         .headers()
@@ -124,10 +115,10 @@ async fn send_request(
         .into_response()
         .await?;
 
-    Ok(((token, hash), response))
+    Ok((hash, response))
 }
 
-async fn load_token(client: &Client) -> Result<(String, String)> {
+async fn load_token(client: &Client) -> Result<String> {
     let resp = client
         .get("https://duckduckgo.com/duckchat/v1/status")
         .header(header::REFERER, ORIGIN_API)
@@ -135,13 +126,6 @@ async fn load_token(client: &Client) -> Result<(String, String)> {
         .send()
         .await?
         .error_for_status()?;
-
-    let token = resp
-        .headers()
-        .get("x-vqd-4")
-        .and_then(|header| header.to_str().ok())
-        .ok_or_else(|| crate::Error::MissingHeader)?
-        .to_owned();
 
     let hash = resp
         .headers()
@@ -152,7 +136,7 @@ async fn load_token(client: &Client) -> Result<(String, String)> {
 
     let request_hash = gen_request_hash(&hash)?;
 
-    Ok((token, request_hash))
+    Ok(request_hash)
 }
 
 mod process {

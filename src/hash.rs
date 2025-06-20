@@ -111,7 +111,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     let innerhtml_pat =
         capture(r"=([^,;]+),String").ok_or_else(|| HashError("inner html pattern not found"))?;
     let innerhtml = resolve_value(innerhtml_pat);
-    // dbg!(innerhtml);
+    // dbg!(&innerhtml);
 
     let inner_html_data: HashMap<&str, i32> = HashMap::from([
         ("<div><div></div><div></div", 99),
@@ -137,12 +137,12 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     let challenge_id_pat =
         capture(r"'challenge_id':([^},]+)").ok_or_else(|| HashError("challenge id not found"))?;
     let challenge_id = resolve_value(challenge_id_pat);
-    // dbg!(challenge_id);
+    // dbg!(&challenge_id);
 
     let timestamp_pat =
         capture(r"'timestamp':([^},]+)").ok_or_else(|| HashError("timestamp not found"))?;
     let timestamp = resolve_value(timestamp_pat);
-    // dbg!(timestamp);
+    // dbg!(&timestamp);
 
     let result_json = serde_json::json!({
         "server_hashes": server_hashes,

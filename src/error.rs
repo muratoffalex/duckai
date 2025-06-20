@@ -18,7 +18,7 @@ pub enum Error {
     #[error(transparent)]
     JsonExtractorRejection(#[from] axum::extract::rejection::JsonRejection),
 
-    #[error("Missing or invalid 'x-vqd-4' header")]
+    #[error("Missing or invalid 'x-vqd-hash-1' header")]
     MissingHeader,
 
     #[error("{0}")]
