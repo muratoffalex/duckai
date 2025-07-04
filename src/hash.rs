@@ -35,7 +35,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
             .map(|m| m.as_str())
     };
 
-    let string_array: Vec<&str> = capture(r"=\[([^\]]*)\]")
+    let string_array: Vec<&str> = capture(r"const _0x......=\[([^\]]*)\]")
         .ok_or_else(|| HashError("string array not found"))?
         .split(',')
         .map(|s| s.trim_matches('\''))
@@ -48,17 +48,13 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
 
     let find_offset = |pat, target: &'static str| {
         let index = get_hex(pat);
-        let origin_index = string_array.iter().position(|&s| s == target).unwrap() as isize;
+        // dbg!(&string_array);
+        let origin_index = string_array
+            .iter()
+            .position(|&s| s == target)
+            .expect("offset pattern not found in string array") as isize;
         origin_index - (index - offset)
     };
-
-    if shift_offset.is_none() {
-        let doc_pat = capture(r"document\[[^(]*\(0x([[:alnum:]]+)\)\]");
-        // dbg!(doc_pat);
-        if let Some(pat) = doc_pat {
-            shift_offset = Some(find_offset(pat, "createElement"));
-        }
-    }
 
     if shift_offset.is_none() {
         let user_agent_pat = capture(r"'client_hashes':\[navigator\[[^(]*\(0x([[:alnum:]]+)\)\]");
@@ -69,25 +65,33 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     }
 
     if shift_offset.is_none() {
-        let div_pat = capture(r"0x([[:alnum:]]+)\)\);return\s");
-        // dbg!(div_pat);
-        if let Some(pat) = div_pat {
-            shift_offset = Some(find_offset(pat, "div"));
+        let length_pat = capture(r"\(0x([[:alnum:]]+)\)]\*_");
+        // dbg!(length_pat);
+        if let Some(pat) = length_pat {
+            shift_offset = Some(find_offset(pat, "length"));
+        }
+    }
+
+    if shift_offset.is_none() {
+        let query_pat = capture(r"\(0x([[:alnum:]]+)\)]\('\*'\)");
+        // dbg!(query_pat);
+        if let Some(pat) = query_pat {
+            shift_offset = Some(find_offset(pat, "querySelectorAll"));
         }
     }
 
     let shift_offset = shift_offset.ok_or_else(|| HashError("shift offset not found"))?;
     // dbg!(shift_offset);
 
-    let mut server_hashes = vec![None, None];
+    let mut server_hashes = vec![None, None, None];
 
-    let server_hash_pats = Regex::new(r"'server_hashes':\[([^,]+),([^]]+)\]")
+    let server_hash_pats = Regex::new(r"'server_hashes':\[([^,]+),([^,]+),([^]]+)\]")
         .unwrap()
         .captures(&decoded_str)
         .and_then(|cap| {
-            let a = cap.get(1).map(|s| s.as_str());
-            let b = cap.get(2).map(|s| s.as_str());
-            a.zip(b).map(|(a, b)| vec![a, b])
+            (1..=3)
+                .map(|i| cap.get(i).map(|m| m.as_str()))
+                .collect::<Option<Vec<_>>>()
         })
         .ok_or_else(|| HashError("server hash pats not found"))?;
     // dbg!(&server_hash_pats);
@@ -134,6 +138,10 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     // dbg!(extracted_number + inner_html_len);
     let number_hash = compute_sha256_base64(&(extracted_number + inner_html_len).to_string());
 
+    let third_pat = capture(r",([^)]+)..;}....,'signals'")
+        .ok_or_else(|| HashError("third pattern not found"))?;
+    let third_hash = compute_sha256_base64(third_pat);
+
     let challenge_id_pat =
         capture(r"'challenge_id':([^},]+)").ok_or_else(|| HashError("challenge id not found"))?;
     let challenge_id = resolve_value(challenge_id_pat);
@@ -146,14 +154,15 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
 
     let result_json = serde_json::json!({
         "server_hashes": server_hashes,
-        "client_hashes": [user_agent_hash, number_hash],
+        "client_hashes": [user_agent_hash, number_hash, third_hash],
         "signals": {},
         "meta": {
-            "v": "3",
+            "v": "4",
             "challenge_id": challenge_id,
             "timestamp": timestamp,
             "origin":"https://duckduckgo.com",
-            "stack":"@https://duckduckgo.com/dist/wpm.chat.4a9875a416a3b5ff84e8.js:1:59965"
+            "stack":"@https://duckduckgo.com/dist/wpm.chat.8bef2abd792822e606e9.js:1:23932",
+            "duration": "13"
         }
     });
     // dbg!(result_json.to_string());

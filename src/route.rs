@@ -2,6 +2,7 @@ use crate::Result;
 use crate::error::Error::{self, MissingHeader};
 use crate::hash::gen_request_hash;
 use crate::model::ChatRequest;
+use crate::process::ChatProcess;
 use crate::serve::AppState;
 use axum::{
     Json,
@@ -13,7 +14,6 @@ use axum_extra::{
     extract::WithRejection,
     headers::{Authorization, authorization::Bearer},
 };
-use crate::process::ChatProcess;
 use reqwest::{Client, header};
 
 const ORIGIN_API: &str = "https://duckduckgo.com";
