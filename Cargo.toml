@@ -11,6 +11,7 @@ url = { version = "2", features = ["serde"] }
 typed-builder = "0.20"
 futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+openssl = { version = "0.10", features = ["vendored"] }
 
 # client
 reqwest = { version = "0.12", features = ["json", "stream", "cookies"] }
