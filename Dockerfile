@@ -1,5 +1,4 @@
-FROM ghcr.io/penumbra-x/rust-musl-cross:x86_64-unknown-linux-musl AS builder
-
+FROM messense/rust-musl-cross:x86_64-musl AS builder
 WORKDIR /app
 
 COPY . .
