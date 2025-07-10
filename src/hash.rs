@@ -138,9 +138,11 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     // dbg!(extracted_number + inner_html_len);
     let number_hash = compute_sha256_base64(&(extracted_number + inner_html_len).to_string());
 
-    let third_pat = capture(r",([^)]+)..;}....,'signals'")
+    let third_pat = capture(r",([^)]+)\)\);}\(\)\)],'signals'")
         .ok_or_else(|| HashError("third pattern not found"))?;
-    let third_hash = compute_sha256_base64(third_pat);
+    let third_num = get_hex(&third_pat[2..]);
+    let third_hash = compute_sha256_base64(&third_num.to_string());
+    // dbg!(third_num);
 
     let challenge_id_pat =
         capture(r"'challenge_id':([^},]+)").ok_or_else(|| HashError("challenge id not found"))?;
