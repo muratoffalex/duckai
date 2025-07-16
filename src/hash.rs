@@ -25,6 +25,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
         .decode(hash.as_bytes())
         .expect("invalid base64");
     let decoded_str = String::from_utf8(decoded_bytes).expect("invalid utf-8");
+    // let decoded_str = "".to_string();
     // dbg!(&decoded_str);
 
     let capture = |pat: &str| {
@@ -35,14 +36,16 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
             .map(|m| m.as_str())
     };
 
-    let string_array: Vec<&str> = capture(r"const _0x......=\[([^\]]*)\]")
+    let string_array: Vec<&str> = capture(r"const _0x......=\[(.*?)\];")
         .ok_or_else(|| HashError("string array not found"))?
         .split(',')
         .map(|s| s.trim_matches('\''))
         .collect();
+    // dbg!(&string_array);
 
     let offset = capture(r"0x([[:alnum:]]+);let").ok_or_else(|| HashError("offset not found"))?;
     let offset = isize::from_str_radix(offset, 16).map_err(|_| HashError("offset error"))?;
+    // dbg!(offset);
 
     let mut shift_offset = None;
 
@@ -65,10 +68,10 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     }
 
     if shift_offset.is_none() {
-        let length_pat = capture(r"\(0x([[:alnum:]]+)\)]\*_");
-        // dbg!(length_pat);
-        if let Some(pat) = length_pat {
-            shift_offset = Some(find_offset(pat, "length"));
+        let reduce_pat = capture(r"\(Number\)\[_0x.{6}\(0x(.*?)\)\]");
+        // dbg!(reduce_pat);
+        if let Some(pat) = reduce_pat {
+            shift_offset = Some(find_offset(pat, "reduce"));
         }
     }
 
@@ -112,35 +115,46 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     }
     // dbg!(&server_hashes);
 
-    let innerhtml_pat =
-        capture(r"=([^,;]+),String").ok_or_else(|| HashError("inner html pattern not found"))?;
-    let innerhtml = resolve_value(innerhtml_pat);
-    // dbg!(&innerhtml);
-
-    let inner_html_data: HashMap<&str, i32> = HashMap::from([
-        ("<div><div></div><div></div", 99),
-        ("<p><div></p><p></div", 128),
-        ("<br><div></br><br></div", 92),
-        ("<li><div></li><li></div", 87),
-    ]);
-
-    let inner_html_len = inner_html_data
-        .get(innerhtml.as_str())
-        .ok_or_else(|| HashError("unknown inner html pattern"))?;
-
-    let extracted_number = capture(r"String\(0x([[:alnum:]]+)\+")
-        .ok_or_else(|| HashError("extracted number not found"))?;
-    let extracted_number = i32::from_str_radix(extracted_number, 16)
-        .map_err(|_| HashError("extracted number parsing error"))?;
-    // dbg!(extracted_number);
-
     let user_agent_hash = compute_sha256_base64(crate::client::USER_AGENT);
-    // dbg!(extracted_number + inner_html_len);
-    let number_hash = compute_sha256_base64(&(extracted_number + inner_html_len).to_string());
 
-    let third_pat = capture(r",([^)]+)\)\);}\(\)\)],'signals'")
+    let second_hash = if decoded_str.contains("innerHTML") {
+        // dbg!("innerHTML check");
+        let innerhtml_pat = capture(r"=([^,;]+),String")
+            .ok_or_else(|| HashError("inner html pattern not found"))?;
+        let innerhtml = resolve_value(innerhtml_pat);
+        // dbg!(&innerhtml);
+        let inner_html_data: HashMap<&str, isize> = HashMap::from([
+            ("<div><div></div><div></div", 99),
+            ("<p><div></p><p></div", 128),
+            ("<br><div></br><br></div", 92),
+            ("<li><div></li><li></div", 87),
+        ]);
+        let inner_html_len = inner_html_data
+            .get(innerhtml.as_str())
+            .ok_or_else(|| HashError("unknown inner html pattern"))?;
+        let number_pat = capture(r"String\(0x([[:alnum:]]+)\+")
+            .ok_or_else(|| HashError("extracted number not found"))?;
+        let number = get_hex(number_pat);
+        compute_sha256_base64(&(number + inner_html_len).to_string())
+    } else if decoded_str.contains("instanceof HTMLDivElement") {
+        // dbg!("13 checks");
+        let number_pat = capture(r",0x([[:alnum:]]+)\)\);\}\(\)\),\(function")
+            .ok_or_else(|| HashError("extracted number not found"))?;
+        let number = get_hex(number_pat);
+        compute_sha256_base64(&(number + 12).to_string())
+    } else if decoded_str.contains("Content-Security-Policy") {
+        // dbg!("4 checks");
+        let number_pat = capture(r",0x([[:alnum:]]+)\)\);\}\(\)\),\(function")
+            .ok_or_else(|| HashError("extracted number not found"))?;
+        let number = get_hex(number_pat);
+        compute_sha256_base64(&(number + 4).to_string())
+    } else {
+        return Err(HashError("unknown second client hash"));
+    };
+
+    let third_pat = capture(r",0x([^)]+)\)\);}\(\)\)],'signals'")
         .ok_or_else(|| HashError("third pattern not found"))?;
-    let third_num = get_hex(&third_pat[2..]);
+    let third_num = get_hex(third_pat);
     let third_hash = compute_sha256_base64(&third_num.to_string());
     // dbg!(third_num);
 
@@ -156,7 +170,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
 
     let result_json = serde_json::json!({
         "server_hashes": server_hashes,
-        "client_hashes": [user_agent_hash, number_hash, third_hash],
+        "client_hashes": [user_agent_hash, second_hash, third_hash],
         "signals": {},
         "meta": {
             "v": "4",
