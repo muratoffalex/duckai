@@ -60,7 +60,15 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
     };
 
     if shift_offset.is_none() {
-        let user_agent_pat = capture(r"'client_hashes':\[navigator\[[^(]*\(0x([[:alnum:]]+)\)\]");
+        let promise_pat = capture(r"await Promise\[[^(]*\(0x([[:alnum:]]+)\)\]");
+        // dbg!(promise_pat);
+        if let Some(pat) = promise_pat {
+            shift_offset = Some(find_offset(pat, "all"));
+        }
+    }
+
+    if shift_offset.is_none() {
+        let user_agent_pat = capture(r"\]\(\[navigator\[[^(]*\(0x([[:alnum:]]+)\)\],");
         // dbg!(user_agent_pat);
         if let Some(pat) = user_agent_pat {
             shift_offset = Some(find_offset(pat, "userAgent"));
@@ -152,7 +160,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
         return Err(HashError("unknown second client hash"));
     };
 
-    let third_pat = capture(r",0x([^)]+)\)\);}\(\)\)],'signals'")
+    let third_pat = capture(r",0x([^)]+)\)\);}.....,'signals'")
         .ok_or_else(|| HashError("third pattern not found"))?;
     let third_num = get_hex(third_pat);
     let third_hash = compute_sha256_base64(&third_num.to_string());
