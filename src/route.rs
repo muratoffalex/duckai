@@ -72,11 +72,16 @@ pub async fn chat_completions(
     state.valid_key(bearer)?;
     let mut token = None;
     for _ in 0..5 {
-        token = load_token(&state.client).await.ok();
-        if token.is_some() {
-            break;
+        match load_token(&state.client).await {
+            Ok(new_token) => {
+                token = Some(new_token);
+                break;
+            }
+            Err(err) => {
+                tracing::info!("retry load token: {:?}", err);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
         }
-        tracing::info!("retry load token: {:?}", token);
     }
     let token = token.ok_or_else(|| Error::BadRequest("cannot get token".to_string()))?;
     body.compress_messages();
