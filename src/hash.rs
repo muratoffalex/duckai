@@ -36,7 +36,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
             .map(|m| m.as_str())
     };
 
-    let string_array: Vec<&str> = capture(r"const _0x......=\[(.*?)\];")
+    let string_array: Vec<&str> = capture(r"\{const _0x......=\[(.*?)\];")
         .ok_or_else(|| HashError("string array not found"))?
         .split(',')
         .map(|s| s.trim_matches('\''))
@@ -160,7 +160,7 @@ pub fn gen_request_hash(hash: &str) -> Result<String> {
         return Err(HashError("unknown second client hash"));
     };
 
-    let third_pat = capture(r",0x([^)]+)\)\);}.....,'signals'")
+    let third_pat = capture(r",0x([^)]+)\)\);}\(\)\)]\)")
         .ok_or_else(|| HashError("third pattern not found"))?;
     let third_num = get_hex(third_pat);
     let third_hash = compute_sha256_base64(&third_num.to_string());
